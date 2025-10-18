@@ -36,3 +36,21 @@ func GetMovies() gin.HandlerFunc {
 		_context.JSON(http.StatusOK, movies)
 	}
 }
+
+func GetMovieByImdbID() gin.HandlerFunc {
+	return func(_context *gin.Context) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		imdbID := _context.Param("imdb_id")
+		var movie model.Movie
+
+		err := movieCollection.FindOne(ctx, bson.M{"imdb_id": imdbID}).Decode(&movie)
+		if err != nil {
+			_context.JSON(http.StatusNotFound, gin.H{"error": "Movie not found"})
+			return
+		}
+
+		_context.JSON(http.StatusOK, movie)
+	}
+}
