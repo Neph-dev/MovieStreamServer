@@ -2,10 +2,12 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
 	db "github.com/Neph-dev/MovieStreamServer/database"
+	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -79,4 +81,37 @@ func UpdateTokens(signedToken string, signedRefreshToken string, UID string) err
 	)
 
 	return err
+}
+
+func GetAccessToken (_context *gin.Context) (string, error) {
+	authHeader := _context.Request.Header.Get("Authorization")
+	
+	if authHeader == "" {
+		return "", errors.New("authorization header missing")
+	}
+
+	tokenString := authHeader[len("Bearer "):]
+	if tokenString == "" {
+		return "", errors.New("bearer token missing")
+	}
+
+	return tokenString, nil
+}
+
+func ValidateToken(signedToken string) (*SignedDetails, error) {
+	claims := &SignedDetails{}
+
+	token, err := jwt.ParseWithClaims(signedToken, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(JWT_SECRET_KEY), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	return claims, nil
 }
