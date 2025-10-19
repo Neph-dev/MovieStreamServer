@@ -73,6 +73,8 @@ func RegisterUser () gin.HandlerFunc {
 }
 
 func LoginUser() gin.HandlerFunc {
+	var userCollection = db.OpenCollection("users")
+
 	return func(_context *gin.Context) {
 		var userLogin model.UserLogin
 		if err := _context.BindJSON(&userLogin); err != nil {

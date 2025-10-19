@@ -115,3 +115,11 @@ func ValidateToken(signedToken string) (*SignedDetails, error) {
 
 	return claims, nil
 }
+
+func GetDataFromContext(_context *gin.Context, field string) (string, error) {
+	value, exists := _context.Get(field)
+	if !exists {
+		return "", errors.New("required data not found in context")
+	}
+	return value.(string), nil
+}

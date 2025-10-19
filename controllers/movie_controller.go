@@ -3,10 +3,10 @@ package controllers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var movieCollection *mongo.Collection = db.OpenCollection("movies")
@@ -111,9 +112,8 @@ var reviewUpdateResponse struct {
 
 func AdminReviewUpdate() gin.HandlerFunc {
 	return func(_context *gin.Context) {
-		role, exists := _context.Get("role")
-		fmt.Println(role, exists)
-		if !exists || role != "ADMIN" {
+		role, err := utils.GetDataFromContext(_context, "role")
+		if err != nil || role != "ADMIN" {
 			_context.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: Admins only"})
 			return
 		}
@@ -141,7 +141,7 @@ func AdminReviewUpdate() gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 		defer cancel()
 
-		exists, err = utils.DocumentExists(ctx, movieCollection, bson.M{"imdb_id": imdbID})
+		exists, err := utils.DocumentExists(ctx, movieCollection, bson.M{"imdb_id": imdbID})
 		
 		if err != nil {
 			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking for existing movie"})
@@ -250,4 +250,107 @@ func GetRankings() ([]models.Ranking, error) {
 	}
 
 	return rankings, nil
+}
+
+func GetRecommendedMovies() gin.HandlerFunc { 
+	return func(_context *gin.Context) {
+		userId, err := utils.GetDataFromContext(_context, "userId")
+		if err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error retrieving user data from context"})
+			return
+		}
+
+		favouriteGenres, err := GetUserFavouriteGenres(userId)
+		if err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		err = godotenv.Load()
+		if err != nil {
+			log.Println("Warning: .env file not found, proceeding with existing environment variables")
+			return
+		}
+
+		var recommendedMovieLimit int64 = 5
+		recommendedMovieLimitStr := os.Getenv("RECOMMENDED_MOVIE_LIMIT")
+
+		if recommendedMovieLimitStr != "" {
+			if limit, err := strconv.ParseInt(recommendedMovieLimitStr, 10, 64); err == nil {
+				recommendedMovieLimit = limit
+			}
+		}
+
+		findOptions := options.Find()
+		findOptions.SetSort(bson.D{{Key: "ranking.ranking_value", Value: 1}})
+		findOptions.SetLimit(recommendedMovieLimit)
+		
+		movieFilter := bson.M{"genre.genre_name": bson.M{"$in": favouriteGenres}}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+		
+		cursor, err := movieCollection.Find(ctx, movieFilter, findOptions)
+		if err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching recommended movies from database"})
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var recommendedMovies []models.Movie
+
+		if err = cursor.All(ctx, &recommendedMovies); err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error decoding recommended movies from database"})
+			return
+		}
+
+		_context.JSON(http.StatusOK, recommendedMovies)
+	}
+}
+
+func GetUserFavouriteGenres(userId string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.M{"user_id": userId}
+
+	projection := bson.M{
+		"favourite_genres.genre_name": 1,
+		"_id": 0,
+	}
+
+	opts := options.FindOne().SetProjection(projection)
+
+	var result bson.M
+
+	err := userCollection.FindOne(ctx, filter, opts).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return []string{}, nil
+		}
+
+		return nil, err
+	}
+
+	favGenresArray, ok := result["favourite_genres"].(bson.A)
+	if !ok {
+		return nil, errors.New("error fetching favourite genres")
+	}
+
+	var genreNames []string
+
+	for _, genre := range favGenresArray {
+		if genreDoc, ok := genre.(bson.D); ok {
+			for _, elem := range genreDoc {
+				if elem.Key == "genre_name" {
+					if genreName, ok := elem.Value.(string); ok {
+						genreNames = append(genreNames, genreName)
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return genreNames, nil
 }
