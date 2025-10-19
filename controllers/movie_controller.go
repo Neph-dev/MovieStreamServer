@@ -7,6 +7,7 @@ import (
 
 	db "github.com/Neph-dev/MovieStreamServer/database"
 	model "github.com/Neph-dev/MovieStreamServer/models"
+	"github.com/Neph-dev/MovieStreamServer/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -14,7 +15,6 @@ import (
 )
 
 var movieCollection *mongo.Collection = db.OpenCollection("movies")
-var validate = validator.New()
 
 func GetMovies() gin.HandlerFunc {
 	return func(_context *gin.Context) {
@@ -68,12 +68,15 @@ func AddMovie() gin.HandlerFunc {
             _context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
             return
         }
+		
+		var validate = validator.New()
+
 		if err := validate.Struct(movie); err != nil {
 			_context.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-        if exists, err := movieExists(ctx, movie.ImdbID); err != nil {
+        if exists, err := utils.DocumentExists(ctx, movieCollection, bson.M{"imdb_id": movie.ImdbID}); err != nil {
             _context.JSON(http.StatusInternalServerError, gin.H{"error": "Error checking for existing movie"})
             return
         } else if exists {
@@ -81,28 +84,11 @@ func AddMovie() gin.HandlerFunc {
             return
         }
 
-        if err := insertMovie(ctx, movie); err != nil {
+        if err := utils.InsertDocument(ctx, movieCollection, movie); err != nil {
             _context.JSON(http.StatusInternalServerError, gin.H{"error": "Error inserting movie into database"})
             return
         }
 
         _context.JSON(http.StatusCreated, movie)
     }
-}
-
-func movieExists(ctx context.Context, imdbID string) (bool, error) {
-    var existingMovie model.Movie
-    err := movieCollection.FindOne(ctx, bson.M{"imdb_id": imdbID}).Decode(&existingMovie)
-    if err == nil {
-        return true, nil
-    }
-    if err == mongo.ErrNoDocuments {
-        return false, nil
-    }
-    return false, err
-}
-
-func insertMovie(ctx context.Context, movie model.Movie) error {
-    _, err := movieCollection.InsertOne(ctx, movie)
-    return err
 }
