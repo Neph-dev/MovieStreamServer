@@ -72,5 +72,60 @@ func RegisterUser () gin.HandlerFunc {
 	}
 }
 
+func LoginUser() gin.HandlerFunc {
+	return func(_context *gin.Context) {
+		var userLogin model.UserLogin
+		if err := _context.BindJSON(&userLogin); err != nil {
+			_context.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+			return
+		}
+
+		var validate = validator.New()
+		if err := validate.Struct(userLogin); err != nil {
+			_context.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": err.Error()})
+			return
+		}
+
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
+
+		var user model.User
+		err := userCollection.FindOne(ctx, bson.M{"email": userLogin.Email}).Decode(&user)
+		if err != nil {
+			_context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+			return
+		}
+
+		err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(userLogin.Password))
+		if err != nil {
+			_context.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+			return
+		}
+
+		token, refreshToken, err := utils.GenerateAllTokens(user.Email, user.FirstName, user.LastName, user.UserID, user.Role)
+		if err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating tokens"})
+			return
+		}
+
+		user.Token = token
+		user.RefreshToken = refreshToken
+
+		err = utils.UpdateTokens(token, refreshToken, user.UserID)
+		if err != nil {
+			_context.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating tokens"})
+			return
+		}
+
+		_context.JSON(http.StatusOK, gin.H{
+			"message": "Login successful",
+			"st-access-token": user.Token,
+			"st-refresh-token": user.RefreshToken,
+		})
+		// _context.SetCookie("token", user.Token, 3600, "/", "localhost", false, true)
+		// _context.SetCookie("refresh_token", user.RefreshToken, 3600, "/", "localhost", false, true)
+	}
+}
+
 
 

@@ -25,3 +25,8 @@ func DocumentExists(ctx context.Context, collection *mongo.Collection, filter bs
 
 	return false, err
 }
+
+func UpdateDocument(ctx context.Context, collection *mongo.Collection, filter bson.M, update bson.M) error {
+	_, err := collection.UpdateOne(ctx, filter, update)
+	return err
+}
